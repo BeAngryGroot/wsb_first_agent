@@ -4,41 +4,51 @@
 
 | ⚡ Resolution Time | 🔁 Self-Correction | 🧪 Test Coverage | 🚀 Deployment |
 |:---:|:---:|:---:|:---:|
-| 45–90 min → **<60s** | Up to **3 retries** | **70%** covered | AWS Lambda · API Gateway |
+| 45–90 min → **<60s** | Up to **3 retries** | **70%** covered | Local Development · AWS Ready |
 
 </div>
 
-An enterprise-grade, production-deployed Agentic RAG system built with **LangGraph**, **GPT-4o**, and **AWS** that autonomously investigates network alarms, retrieves vendor SOPs, drafts incident resolution tickets, and self-evaluates for safety compliance — deployed as a serverless microservice on AWS Lambda and publicly accessible via API Gateway.
+An enterprise-grade Agentic RAG system built with **LangGraph**, **DeepSeek API**, and **Local JSON Storage** that autonomously investigates network alarms, retrieves vendor SOPs, drafts incident resolution tickets, and self-evaluates for safety compliance — designed for both local development and AWS Lambda deployment.
 
 ---
 
-## Live Demo
+## Quick Start
 
-The agent is **deployed and running on AWS**. You can trigger it right now — no setup required:
+### Prerequisites
+- Python 3.10+
+- DeepSeek API key
+- Virtual environment (recommended)
 
-```powershell
-curl.exe -X POST https://yjhndtxwxh.execute-api.us-east-1.amazonaws.com/alarm -H "Content-Type: application/json" -d '{"alarm_id": "ALARM-001", "error_message": ""}'
+### Step 1: Clone the repository
+```bash
+git clone <your-repository-url>
+cd telecom-noc-agent
 ```
 
-Try all four alarm scenarios:
+### Step 2: Set up environment
+```bash
+# Create virtual environment
+python -m venv venv
+# Activate virtual environment
+venv\Scripts\activate  # Windows
+# or: source venv/bin/activate  # macOS/Linux
 
-| `alarm_id` | Device | Fault Type | Severity |
-|-----------|--------|------------|----------|
-| `ALARM-001` | Arris E6000 CMTS | DOCSIS T3 Timeout — 347 modems affected | CRITICAL |
-| `ALARM-002` | Nokia 7360 ISAM FX OLT | GPON ONU Rx Power Degradation | MAJOR |
-| `ALARM-003` | Cisco ASR9001 Core Router | BGP Session Flap — 14 flaps/hour | CRITICAL |
-| `ALARM-004` | Juniper MX480 Edge Router | Interface Queue Congestion — 98.7% util | MAJOR |
+# Install dependencies
+pip install -r requirements.txt
+```
 
-**Expected response** (~20–40s on cold start, ~5s warm):
-```json
-{
-  "alarm_id": "ALARM-001",
-  "is_safe": true,
-  "safety_feedback": "The proposed resolution ticket is SAFE. All steps are directly traceable to the SOPs...",
-  "resolution_ticket": "INCIDENT RESOLUTION TICKET\n==========================\n...",
-  "iterations": 1,
-  "elapsed_seconds": 19.38
-}
+### Step 3: Configure environment variables
+```bash
+cp .env.example .env
+# Edit .env file and add your DEEPSEEK_API_KEY
+```
+
+### Step 4: Run the agent
+```bash
+python main.py                     # ALARM-001 (default)
+python main.py --alarm ALARM-002   # Nokia GPON ONU Rx Low
+python main.py --alarm ALARM-003   # Cisco ASR9001 BGP Flap
+python main.py --alarm ALARM-004   # Juniper MX480 Congestion
 ```
 
 ---
@@ -57,44 +67,42 @@ This agent compresses that entire workflow to **under 60 seconds**, with built-i
 
 ## 🏗️ Architecture
 
-The agent runs as a **4-node LangGraph state machine** deployed on AWS Lambda,
-resolving NOC alarms in under 60 seconds with a built-in self-correction loop.
+The agent runs as a **4-node LangGraph state machine** that resolves NOC alarms in under 60 seconds with a built-in self-correction loop. It can be run locally or deployed to AWS Lambda.
 
 ```mermaid
 flowchart TD
-    A([🌐 API Gateway\nHTTP POST /alarm]) --> B
+    A([💻 Local CLI\nPython main.py]) --> B
 
-    B[λ AWS Lambda\nPython 3.12 · 1GB RAM]
+    B[🔧 Local Execution\nPython 3.10+]
     B --> C
 
     subgraph GRAPH [LangGraph State Machine]
         direction TB
-        C[🔍 check_network\nFetch alarm telemetry\nfrom DynamoDB]
+        C[🔍 check_network\nFetch alarm telemetry\nfrom local JSON]
         C --> D
 
-        D[📚 get_manuals\nRAG retrieval · cosine similarity\nOpenAI text-embedding-3-small]
+        D[📚 get_manuals\nRAG retrieval · string matching\nLocal or DeepSeek API]
         D --> E
 
-        E[✍️ draft_fix\nGenerate resolution ticket\nGPT-4o · temp=0.1]
+        E[✍️ draft_fix\nGenerate resolution ticket\nDeepSeek API · temp=0.1]
         E --> F
 
-        F{🛡️ safety_check\nCritic audit\nGPT-4o · temp=0.0}
+        F{🛡️ safety_check\nCritic audit\nDeepSeek API · temp=0.0}
     end
 
     F -->|✅ Safe| G([📋 Resolution Ticket\nreturned to caller])
     F -->|❌ Unsafe · iter < 3\nfeedback injected| D
     F -->|❌ Max 3 iterations\nexit gracefully| G
 
-    subgraph AWS [AWS Infrastructure]
-        H[(DynamoDB\nSOPs Table)]
-        I[(DynamoDB\nTelemetry Table)]
+    subgraph Local [Local Storage]
+        H[(JSON Files\nSOPs & Telemetry)]
     end
 
-    C --- I
+    C --- H
     D --- H
 
     style GRAPH fill:#1a1a2e,stroke:#4a9eff,color:#fff
-    style AWS fill:#1a2e1a,stroke:#4aff9e,color:#fff
+    style Local fill:#1a2e1a,stroke:#4aff9e,color:#fff
     style F fill:#2e1a1a,stroke:#ff4a4a,color:#fff
     style G fill:#1a2e1a,stroke:#4aff9e,color:#fff
 ```
@@ -103,57 +111,18 @@ flowchart TD
 
 ---
 
-## Cloud Architecture
-
-```
-                        ┌─────────────────────────────────┐
-  curl / HTTP client    │   AWS API Gateway (HTTP API)     │
-  POST /alarm  ───────► │   yjhndtxwxh.execute-api...      │
-                        └────────────────┬────────────────┘
-                                         │ triggers
-                                         ▼
-                        ┌─────────────────────────────────┐
-                        │   AWS Lambda                     │
-                        │   telecom-noc-agent              │
-                        │   Python 3.12 · 1 GiB · 300s    │
-                        │                                  │
-                        │  ┌──────────────────────────┐   │
-                        │  │  Docker Container (ECR)  │   │
-                        │  │  public.ecr.aws/lambda/  │   │
-                        │  │    python:3.12           │   │
-                        │  │                          │   │
-                        │  │   lambda_handler.py      │   │
-                        │  │       │                  │   │
-                        │  │       ▼                  │   │
-                        │  │   LangGraph StateGraph   │   │
-                        │  │   (4 nodes + critic loop)│   │
-                        │  └──────────────────────────┘   │
-                        └────┬────────────────────┬───────┘
-                             │                    │
-                IAM role     │                    │  OpenAI API
-                (no keys)    ▼                    ▼
-              ┌──────────────────────┐   ┌──────────────────┐
-              │   AWS DynamoDB       │   │  GPT-4o           │
-              │                      │   │  text-embedding   │
-              │  telecom-noc-sops    │   │    -3-small       │
-              │  (5 SOP documents)   │   │                  │
-              │                      │   │  Brain: temp=0.1  │
-              │  telecom-noc-        │   │  Critic: temp=0.0 │
-              │    telemetry         │   │  (structured out) │
-              │  (4 alarm scenarios) │   └──────────────────┘
-              └──────────────────────┘
-```
+## Local Architecture
 
 ### How it works
 
-1. **API Gateway** receives a `POST /alarm` request with an `alarm_id` and routes it to Lambda.
-2. **Lambda** (Docker container from ECR) runs the LangGraph workflow.
-3. **Node 1** queries DynamoDB for live device telemetry (CPU, SNR, error counters, etc.).
-4. **Node 2** fetches all SOPs from DynamoDB, embeds them with `text-embedding-3-small`, and returns the top-3 most relevant via numpy cosine similarity — no vector database required.
-5. **Node 3** (GPT-4o Brain) synthesizes telemetry + SOPs into a structured resolution ticket.
-6. **Node 4** (GPT-4o Critic) audits every step for SOP compliance using structured output.
-7. If the ticket fails the audit, the agent loops back to Node 2 with the critic's feedback for a more targeted SOP retrieval — up to 3 iterations.
-8. The final approved ticket is returned as JSON to the API caller.
+1. **Local CLI** runs `python main.py` with an optional `--alarm` parameter.
+2. **LangGraph State Machine** executes the 4-node workflow:
+   - **Node 1** (`check_network`): Loads alarm telemetry from local JSON files.
+   - **Node 2** (`get_manuals`): Retrieves relevant SOPs using string matching or embeddings.
+   - **Node 3** (`draft_fix`): Uses DeepSeek API to generate a resolution ticket.
+   - **Node 4** (`safety_check`): Uses DeepSeek API to audit the ticket for SOP compliance.
+3. **Self-correction loop**: If the ticket fails the audit, the agent loops back to Node 2 with feedback — up to 3 iterations.
+4. **Final output**: The approved ticket (or flagged ticket with safety concerns) is returned to the user.
 
 ### Self-Correction Loop
 
@@ -185,18 +154,15 @@ high-pressure network operations environments.
 | Layer | Technology | Notes |
 |-------|-----------|-------|
 | **Orchestration** | LangGraph ≥0.2.0 | StateGraph with conditional routing |
-| **LLM** | GPT-4o via LangChain | Brain (temp=0.1) + Critic (temp=0.0, structured output) |
-| **Embeddings** | text-embedding-3-small | Cached per Lambda container lifecycle |
-| **RAG / Vector Search** | DynamoDB + numpy cosine similarity | No vector DB — free tier, cloud-native |
-| **Data Store** | AWS DynamoDB | PAY_PER_REQUEST billing — free tier forever |
-| **Compute** | AWS Lambda | 1 GiB RAM, 300s timeout, Docker image |
-| **Container Registry** | AWS ECR | linux/amd64 image, public.ecr.aws base |
-| **API** | AWS API Gateway (HTTP API) | POST /alarm, auto-deploy, CORS enabled |
+| **LLM** | DeepSeek API via LangChain | Brain (temp=0.1) + Critic (temp=0.0) |
+| **Embeddings** | Local (all-MiniLM-L6-v2) | Optional; falls back to string matching |
+| **RAG / Vector Search** | Local JSON + string matching | Simple and lightweight |
+| **Data Store** | Local JSON files | `data/sops.json` and `data/mock_telemetry.json` |
+| **Compute** | Local Python | Tested with Python 3.10+ |
 | **Validation** | Pydantic v2 | `SafetyAuditResult` enforces boolean `is_safe` + feedback |
-| **Runtime** | Python 3.12 | uv for local dependency management |
-| **Testing** | pytest + moto | DynamoDB mocked via moto; OpenAI mocked via unittest.mock |
-| **Linting / Formatting** | Ruff + mypy | Enforced via pre-commit hooks and CI |
-| **CI** | GitHub Actions | 3-stage pipeline: lint → test → docker build |
+| **Runtime** | Python 3.10+ | Virtual environment recommended |
+| **Testing** | pytest | Unit tests for core functionality |
+| **Linting / Formatting** | Ruff + mypy | Enforced via pre-commit hooks |
 
 ---
 
@@ -304,33 +270,26 @@ GitHub Actions runs three jobs in sequence on every push:
 
 ### Prerequisites
 - Python 3.10+
-- [uv](https://docs.astral.sh/uv/) (`pip install uv`)
-- An OpenAI API key with access to `gpt-4o` and `text-embedding-3-small`
-- AWS credentials with DynamoDB read access (`aws configure`)
+- DeepSeek API key
+- Virtual environment (recommended)
 
 ### Step 1: Clone and install
 ```bash
-git clone https://github.com/DevMLAI01/telecom-noc-agent.git
+git clone <your-repository-url>
 cd telecom-noc-agent
-uv venv && .venv/Scripts/activate   # Windows
-# or: source .venv/bin/activate     # macOS / Linux
-uv pip install -r requirements.txt
+python -m venv venv
+venv\Scripts\activate   # Windows
+# or: source venv/bin/activate     # macOS / Linux
+pip install -r requirements.txt
 ```
 
 ### Step 2: Configure environment
 ```bash
 cp .env.example .env
-# Edit .env — fill in OPENAI_API_KEY and AWS credentials
+# Edit .env — fill in DEEPSEEK_API_KEY
 ```
 
-### Step 3: Seed DynamoDB (one-time)
-```bash
-python scripts/seed_dynamodb.py
-# Creates telecom-noc-sops and telecom-noc-telemetry tables
-# and uploads all SOPs and telemetry data from the data/ JSON files
-```
-
-### Step 4: Run locally
+### Step 3: Run locally
 ```bash
 python main.py                     # ALARM-001 (default)
 python main.py --alarm ALARM-002   # Nokia GPON ONU Rx Low
@@ -340,18 +299,20 @@ python main.py --alarm ALARM-004   # Juniper MX480 Congestion
 
 ---
 
-## Docker / Lambda Deployment
+## Docker / Lambda Deployment (Optional)
+
+The agent can be deployed to AWS Lambda if needed. The project includes a `Dockerfile` and `lambda_handler.py` for this purpose.
 
 ```bash
 # Build the Lambda container image (linux/amd64 — required for Lambda)
 docker buildx build --platform linux/amd64 --provenance=false \
-  -t 585707316150.dkr.ecr.us-east-1.amazonaws.com/telecom-noc-agent:latest \
+  -t <your-ecr-repository>:latest \
   --push .
 
 # Update Lambda to pull the new image
 aws lambda update-function-code \
-  --function-name telecom-noc-agent \
-  --image-uri 585707316150.dkr.ecr.us-east-1.amazonaws.com/telecom-noc-agent:latest
+  --function-name <your-lambda-function> \
+  --image-uri <your-ecr-repository>:latest
 ```
 
 > `--provenance=false` is required when building on Docker Desktop for Windows — without it, Docker
@@ -359,15 +320,34 @@ aws lambda update-function-code \
 
 ---
 
+## Push to GitHub
+
+### Step 1: Create a new repository on GitHub
+1. Go to GitHub and create a new repository
+2. Copy the repository URL
+
+### Step 2: Push your local repository
+```bash
+# Add the remote repository
+git remote add origin <your-github-repository-url>
+
+# Push to GitHub
+git push -u origin master
+```
+
+### Step 3: Verify the push
+Go to your GitHub repository to see the pushed code.
+
+---
+
 ## Extending the Agent
 
 ### Add a new alarm scenario
 1. Add an entry to `data/mock_telemetry.json`
-2. Run `python scripts/seed_dynamodb.py` to upload it
-3. Add the scenario to `ALARM_SCENARIOS` in `main.py`
+2. Add the scenario to `ALARM_SCENARIOS` in `main.py`
 
 ### Connect to a real NMS
-Replace the DynamoDB loader in `data/mock_telemetry.py` with an API call:
+Replace the JSON loader in `data/mock_telemetry.py` with an API call:
 ```python
 def get_telemetry_for_alarm(alarm_id: str) -> dict:
     response = requests.get(
@@ -379,8 +359,6 @@ def get_telemetry_for_alarm(alarm_id: str) -> dict:
 
 ### Load real SOP documents
 1. Add entries to `data/sops.json` (or load from PDFs with `PyPDFLoader`)
-2. Re-run `python scripts/seed_dynamodb.py`
-3. Redeploy Lambda to clear the in-memory embedding cache
 
 ### Add memory and persistence
 ```python
